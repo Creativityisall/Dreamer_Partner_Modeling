@@ -1,0 +1,15 @@
+env_args:
+  map_name: 2s3z
+  use_absorbing_state: true
+  trailing_absorbing_state_length: 2
+
+world_model:
+  rssm:
+    use_act_mask_predictor: true
+    use_cont_predictor: true
+
+train:
+  gamma: 0.99
+
+logging:
+  log_keys_avg: '^log_battle_won$'

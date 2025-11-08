@@ -1,0 +1,87 @@
+seed: 0
+name: "train"
+# logdir is set to empty string so it can be updated by the main script
+logdir: ""
+use_rnn: true
+
+device:
+    cuda: true
+    cuda_deterministic: true
+    torch_threads: 4
+
+train:
+    n_rollout_threads: 16
+    parallel_rollout: true
+    num_env_steps: 2e7
+    batch_length: 100
+    entropy_coef: 1e-2
+    gamma: 0.99
+    gae_lambda: 0.95
+    share_actors: true
+    share_critics: true
+    # ppo specific parameters
+    ppo_epochs: 5
+    clip_param: 0.2
+    # optimizer configs for each model, use Adam as default
+    optim:
+        critic:
+            lr: 5e-4
+            eps: 1e-5
+            use_max_grad_norm: true
+            max_grad_norm: 10.0
+        actor:
+            lr: 5e-4
+            eps: 1e-5
+            use_max_grad_norm: true
+            max_grad_norm: 10.0
+    checkpoint:
+        save_interval: 50000
+        from_checkpoint: ""
+
+use_eval: true
+eval:
+    parallel_rollout: true
+    n_rollout_threads: 4
+    eval_interval: 10000
+    eval_episode_num: 32
+
+logging:
+    log_interval: 5000
+    rewards_reduce: "mean"
+    terminal_filter: '^((?!timer).)*$'
+    use_wandb: true
+    wandb_filter: '.*'
+    wandb_config:
+        project: "DMAWM"
+        job_type: "on_policy"
+        entity: ""
+        notes: ""
+    log_keys_sum: '^$'
+    log_keys_avg: '^$'
+    log_keys_max: '^$'
+    timer: true
+
+actor:
+    act: SiLU
+    hidden_dim: 256
+    hidden_layers: 2
+    use_layernorm: true
+    out_scale: 0.01
+    use_symlog: false
+    # cnn
+    kernel: 4
+    depth: 32
+    mults: [2, 3, 4, 4]
+
+critic:
+    act: SiLU
+    hidden_dim: 256
+    hidden_layers: 2
+    use_layernorm: true
+    out_scale: 0.0
+    output: "symexp_twohot"
+    use_symlog: false
+    # cnn
+    kernel: 4
+    depth: 32
+    mults: [2, 3, 4, 4]

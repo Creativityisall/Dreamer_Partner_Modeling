@@ -1,0 +1,7 @@
+env_args:
+  # wrapper args
+  lib_name: butterfly
+  env_name: pistonball_v6
+  # pistonball args
+  continuous: False
+  max_cycles: 125

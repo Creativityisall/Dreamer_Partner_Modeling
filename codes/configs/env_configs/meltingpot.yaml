@@ -1,0 +1,9 @@
+env_args:
+  substrate: coop_mining
+  roles: ["default", "default", "default", "default"] # 4 players
+  max_cycles: 1000
+  reshape: [44, 44]
+  use_avail_actions: false
+
+logging:
+  rewards_reduce: "sum"

@@ -1,0 +1,12 @@
+env_args:
+  # wrapper args
+  lib_name: mpe
+  env_name: simple_spread_v3
+  # env args
+  N: 3
+  continuous_actions: False
+  max_cycles: 25
+  local_ratio: 0.5
+
+logging:
+    rewards_reduce: "mean"
