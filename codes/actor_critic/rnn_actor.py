@@ -9,6 +9,7 @@ from collections import defaultdict
 
 from utils.tools import Optimizer, RequiresGrad
 from utils.networks import MLP, CNN, GRU, weight_init
+from partner_model.global_encoder import Partner_Model
 import elements
 
 class RNNActor(nn.Module):
@@ -58,6 +59,20 @@ class RNNActor(nn.Module):
         self._out = nn.Linear(config.actor.hidden_dim, n_actions, device=device)
         weight_init(self._out, scale=config.actor.out_scale)
 
+        # partner modeling
+        self.partner_model = Partner_Model(# TODO: to confirm the dimensions
+            in_dim=(
+                config.world_model.rssm.deterministic_dim
+                + config.world_model.rssm.stochastic_dim * config.world_model.rssm.classes
+            ),
+            hidden_dim=config.partner_model.hidden_dim,
+            hidden_layers=config.partner_model.hidden_layers,
+            out_dim=config.partner_model.hidden_dim * (n_agents - 1),
+            act=config.partner_model.act,
+            use_layernorm=config.partner_model.use_layernorm,
+            device=device
+        )
+
         # context manager for gradient control
         self._requires_grad = RequiresGrad(self)
 
@@ -79,6 +94,8 @@ class RNNActor(nn.Module):
             evaluation: bool = False,
         ) -> Dict[str, torch.Tensor]:
         actor_outputs = {}
+
+        # TODO:添加队友建模，分为训练和推理两种情况
 
         # 先过编码层再过RNN。
         actor_features = self._base(obs)
@@ -175,6 +192,8 @@ class RNNActor(nn.Module):
                 entropy = actor_outputs["entropy"].unsqueeze(-1)
                 entropy = (entropy * agent_mask).sum() / (agent_mask.sum() + 1e-5) if agent_mask is not None else entropy.mean()
                 entropy_loss = - entropy
+
+                # TODO:partner_model loss
 
                 loss = policy_loss + self.config.train.entropy_coef * entropy_loss
                 optim_metric = self._optim(loss)

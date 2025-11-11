@@ -180,8 +180,9 @@ class DreamerRunner:
         )  # (Batch, N_agents, Latent_dim)
 
         # 3. 演员（Actor）策略执行
+        # 多智能体动作输出是一个列表，由各个动作组成的列表
         actor_outputs: List[TensorDict] = [
-            self.actors[i](
+            self.actors[i](# 多智能体
                 latent=latent[:, i],  # 提取并传入当前智能体的信念状态 (Batch, Latent_dim)
                 # 提取并传入当前智能体的可用动作掩码
                 avail_actions=avail_actions[:, i] if avail_actions is not None else None,

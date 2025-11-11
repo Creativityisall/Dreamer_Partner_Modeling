@@ -283,3 +283,39 @@ class Transformer(nn.Module):
         if self._output_layer is not None:
             x = self._output_layer(x)
         return x
+
+# Partner_model的所有操作都封装在这里
+class Partner_Model(nn.Module):
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dim: int,
+        hidden_layers: int,
+        out_dim: int | None = None,
+        act: str = "SiLU",
+        use_layernorm: bool = True,
+        use_symlog: bool = False,
+        device: torch.device = torch.device("cpu"),
+    ):
+        super().__init__()
+        self.use_symlog = use_symlog
+
+        layers = []
+        for _ in range(hidden_layers):
+            layers.append(nn.Linear(in_dim, hidden_dim, device=device))
+            if use_layernorm:
+                layers.append(nn.LayerNorm(hidden_dim, device=device))
+            layers.append(getattr(nn, act)())
+            in_dim = hidden_dim
+
+        if out_dim is not None:
+            layers.append(nn.Linear(in_dim, out_dim, device=device))
+
+        self._mlp = nn.Sequential(*layers)
+        weight_init(self._mlp)
+
+    def forward(self, x: torch.Tensor):
+        if self.use_symlog:
+            x = symlog(x)
+        x = self._mlp(x)
+        return x

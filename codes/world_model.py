@@ -10,6 +10,7 @@ from utils.tools import n2t, scan, RequiresGrad, Optimizer, latent_to_input, get
 from utils.networks import MLP, GRU, CNN, Transformer
 from utils.output_head import MLPHead, FigureHead
 from actor_critic.actor import Actor
+from partner_model.global_encoder import Global_Encoder
 import elements
 
 
@@ -24,6 +25,7 @@ class MAWorldModel(nn.Module):
         self.n_actions = n_actions  # 动作空间维度
         self.n_agents = n_agents  # 智能体数量
         self.device = device  # 计算设备
+        self.vector_dimension = config.partner_model.hidden_dim * n_agents # 队友建模的形状
         self.tpdv = dict(dtype=torch.float32, device=device)  # 张量参数字典
 
         # 世界模型组件
@@ -31,6 +33,9 @@ class MAWorldModel(nn.Module):
         self.encoder = ObsEncoder(config, obs_shape, device)
         # 动态模型：使用RSSM（循环状态空间模型）建模环境动态
         self.dynamics = RSSM(config, n_actions, n_agents, device)
+
+        # Global Encoder
+        self.global_encoder = Global_Encoder(config, n_agents, self.device)
 
         # 观测预测器输入维度计算
         # 确定性维度 + 随机性维度 × 类别数（如果使用分类表示）
@@ -204,7 +209,7 @@ class MAWorldModel(nn.Module):
         生成想象轨迹：给定初始潜在状态和actor策略，生成多步想象轨迹
         """
         # 预分配张量内存
-        B = init_latent["deter"].shape[0]  # 批次大小
+        B = init_latent["deter"].shape[0]  # 批次大小，这是由于并行采样导致的
         T = self.config.train.imagination_steps  # 想象步数
         A = self.n_agents  # 智能体数量
 
@@ -220,12 +225,16 @@ class MAWorldModel(nn.Module):
         terminated = torch.zeros((T + 1, B, A, 1), device=self.device)
         avail_actions = torch.zeros((T + 1, B, A, self.n_actions),
                                     device=self.device) if self.act_mask_predictor is not None else None
+        global_vectors = torch.zeros((T + 1, B, self.vector_dimension), device=self.device)
+        local_vectors = torch.zeros((T + 1, B, A, self.vector_dimension), device=self.device)
 
         # 设置初始值
         agent_embeddings[0] = init_latent["agent_embeddings"]
         deter[0] = init_latent["deter"]
         stoch[0] = init_latent["stoch"]
         rewards[0] = init_latent["rewards"]
+        # 队友建模暂时不初始化，这些向量是通过actor和global_encoder得到的，比obs慢一步。
+
         if self.cont_predictor is not None:
             terminated[0] = init_latent["terminated"]
         if self.act_mask_predictor is not None:
@@ -233,7 +242,12 @@ class MAWorldModel(nn.Module):
 
         def imagine_step(step: torch.Tensor, latent: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
             """想象单步转换"""
+
+            # TODO:处理全局输入
+            global_vector = self.global_encoder(latent)
+
             # 使用actor策略选择动作
+            # TODO:在这里把local_modeling_vector保存在这里
             actor_outputs: List[TensorDict] = [
                 actors[i](
                     latent=latent[:, i],  # 每个智能体的潜在状态
@@ -242,6 +256,7 @@ class MAWorldModel(nn.Module):
                 )
                 for i in range(len(actors))
             ]
+
             actor_outputs = torch.stack(actor_outputs, dim=1)
 
             # 使用动态模型想象下一步状态
@@ -251,6 +266,8 @@ class MAWorldModel(nn.Module):
             actions_env[step] = actor_outputs["actions_env"]  # 环境动作
             deter[step + 1] = next_latent["deter"]  # 确定性状态
             stoch[step + 1] = next_latent["stoch"]  # 随机性状态
+            global_vectors[step] = global_vector
+            local_vectors[step] = actor_outputs["partner_vector"]  # TODO:这里的所有的partner_model_vector被叠在了一起。
             agent_embeddings[step + 1] = self.global_agent_embedding_transformer(deter[step + 1])  # 全局嵌入
             rewards[step + 1] = self.reward_predictor(agent_embeddings[step + 1]).pred()  # 预测奖励
             if self.cont_predictor is not None:
@@ -268,6 +285,7 @@ class MAWorldModel(nn.Module):
         )
 
         # 整理想象轨迹数据
+        # TODO:保存轨迹数据，需要整理所有的建模向量
         imaginary_transitions: Dict[str, torch.Tensor] = {
             "agent_embeddings": agent_embeddings,
             "deter": deter,
@@ -275,6 +293,8 @@ class MAWorldModel(nn.Module):
             "terminated": terminated,
             "rewards": rewards,
             "actions_env": actions_env,
+            "global_vectors": global_vectors,
+            "local_vectors": local_vectors,
         }
         if self.act_mask_predictor is not None:
             imaginary_transitions["avail_actions"] = avail_actions
@@ -407,7 +427,7 @@ class MAWorldModel(nn.Module):
             # 创建非首步掩码（首步通常用于初始化，不用于训练）
             not_first = ~is_first.unsqueeze(-2).repeat(1, 1, self.n_agents, 1)
 
-            # 3. 连续状态预测损失
+            # 3. 是否终止预测损失
             if self.config.world_model.rssm.use_cont_predictor:
                 # 根据配置决定是否使用特征梯度
                 if self.config.world_model.rssm.cont_predictor.enable_feat_grad:
@@ -629,7 +649,7 @@ class RSSM(nn.Module):
 
         x1 = self._mlp_stoch(
             prev_stoch.reshape(-1, self.tot_stoch_dim)
-        ).reshape(*prev_stoch.shape[:-2], -1)
+        ).reshape(*prev_stoch.shape[:-2], -1)# 这里的确定性状态并没有使用随机状态，只是进行了形状转换
         x2 = self._mlp_action(prev_actions)
         x = torch.cat([x1, x2], dim=-1)
         deter = self._rnn(x, prev_deter)
@@ -716,7 +736,7 @@ class RSSM(nn.Module):
         )
         return prior
 
-# 注意所有的obs都需要经过这个encoder的处理得到特征向量
+# 所有的obs都需要经过这个encoder的处理得到特征向量
 class ObsEncoder(nn.Module):
     def __init__(self, config, obs_shape, device):
         super().__init__()

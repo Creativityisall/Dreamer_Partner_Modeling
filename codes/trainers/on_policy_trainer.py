@@ -225,7 +225,7 @@ class OnPolicyTrainer:
                 # 独立策略：迭代更新每个智能体的 Actor
                 for i in range(len(self.actors)):
                     train_metrics = self.actors[i].ppo_update(
-                        obs=obs[:-1, :, i],
+                        obs=obs[:-1, :, i],# obs: 时间步, 维度, agent_index
                         rnn_states=rnn_states[:-1, :, i],
                         actions_env=actions_env[:, :, i],
                         agent_mask=agent_mask[:-1, :, i],

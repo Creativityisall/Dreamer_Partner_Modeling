@@ -26,7 +26,7 @@ def main(argv: List[str]):
 
     # 首先，解析命令行中关于环境和训练器的基础参数，并获取剩余参数
     # 默认值：env="smac", trainer="imagination" (可能用于加载默认的配置文件)
-    config, remaining = elements.Flags(env="smac", trainer="imagination").parse_known(argv)
+    config, remaining = elements.Flags(env="smac", trainer="dreamer").parse_known(argv)
 
     # 2. 加载 Trainer 特定配置
 

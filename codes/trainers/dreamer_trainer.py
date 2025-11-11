@@ -8,6 +8,7 @@ from actor_critic.actor import Actor
 from actor_critic.critic import Critic
 from utils.tools import init_device, get_task_name, make_env, build_returns
 from parallel import Remote, Dummy
+from partner_model.global_encoder import Global_Encoder
 import elements
 
 import numpy as np
@@ -57,12 +58,13 @@ class DreamerTrainer:
             n_agents=n_agents,
             device=self.device,
         )
+
         # initialize actors
         # 这里的*n_agents表明了这里一定是建立了多个模型
-        if config.train.share_actors:
-            self.actors = [Actor(config, n_agents, n_actions, self.device)] * n_agents
-        else:
-            self.actors = [Actor(config, n_agents, n_actions, self.device) for _ in range(n_agents)]
+        if config.train.share_actors: # 使用共同的actor
+            self.actors = [Actor(config, n_agents, n_actions, 0, self.device)] * n_agents # index默认为0
+        else:# 使用独立的actor
+            self.actors = [Actor(config, n_agents, n_actions, i, self.device) for i in range(n_agents)]
         # initialize critics
         if config.train.share_critics:
             self.critics = [Critic(config, device=self.device)] * n_agents
@@ -146,7 +148,7 @@ class DreamerTrainer:
                 init_latent = init_latent[terminated[:, 0, 0] == 0] if terminated is not None else init_latent
                 # init_latent = init_latent
                 imaginary_transitions: Dict[str, torch.Tensor] = self.wm.imagine(self.actors, init_latent)
-                # imaginary_transitions["deter"].shape = (ts, bs, n_agents, deter_dim)000000000000000000000000000000000000000000000000
+                # imaginary_transitions["deter"].shape = (ts, bs, n_agents, deter_dim)00
                 # imaginary_transitions["stoch"].shape = (ts, bs, n_agents, num_classes, stoch_dim)
                 # imaginary_transitions["terminated"].shape = (ts, bs, n_agents, 1)
                 # imaginary_transitions["rewards"].shape = (ts, bs, n_agents, 1)
@@ -183,6 +185,7 @@ class DreamerTrainer:
                 advantages = []
                 for i in range(len(self.actors)):
                     advantage = target_returns[:, :, i] - value_preds[:, :, i]
+                    # 对advantage进行归一化
                     advantage_mean = advantage.mean()
                     advantage_std = advantage.std()
                     advantage = (advantage - advantage_mean) / (advantage_std + 1e-5)
@@ -207,15 +210,20 @@ class DreamerTrainer:
                         advantages=advantages[:-1],
                         actions_env=imaginary_transitions["actions_env"],
                         avail_actions=imaginary_transitions["avail_actions"][:-1] if "avail_actions" in imaginary_transitions else None,
+                        global_vectors=imaginary_transitions["global_vectors"],
+                        local_vectors=imaginary_transitions["local_vectors"],
                     )
                     self.logger.add(int(self.step), train_metrics, prefix="agent_0")
                 else:
+                    # TODO:从这里加入local变量对齐
                     for i in range(len(self.actors)):
                         train_metrics = self.actors[i].ppo_update(
                             latent=latent[:-1, :, i],
                             advantages=advantages[:-1, :, i],
                             actions_env=imaginary_transitions["actions_env"][:, :, i],
                             avail_actions=imaginary_transitions["avail_actions"][:-1, :, i] if "avail_actions" in imaginary_transitions else None,
+                            global_vectors=imaginary_transitions["global_vectors"],
+                            local_vectors=imaginary_transitions["local_vectors"],
                         )
                         self.logger.add(int(self.step), train_metrics, prefix=f"agent_{i}")
 
@@ -248,6 +256,10 @@ class DreamerTrainer:
                                 target_param.data * (1.0 - self.config.train.target_update_tau)
                                 + param.data * self.config.train.target_update_tau
                             )
+                # update global_encoder
+                # TODO:注意全局的encoder应该在这里外部更新
+                self.wm.global_encoder.update(imaginary_transitions["global_vectors"], imaginary_transitions["local_vectors"])
+
 
     @torch.no_grad()
     def eval(self):

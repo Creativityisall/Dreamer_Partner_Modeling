@@ -30,6 +30,7 @@ train:
     cont_scale: 1.0
     act_mask_scale: 1.0
     entropy_coef: 1e-2
+    local_partner_coef: 1e-1 # 队友建模因子
     target_update_tau: 1.0
     gamma: 0.99
     gae_lambda: 0.95
@@ -170,3 +171,21 @@ critic:
     use_layernorm: true
     out_scale: 0.0
     output: "symexp_twohot"
+
+partner_model:
+    act: SiLU
+    hidden_dim: 256
+    hidden_layers: 2
+    use_layernorm: true
+    out_scale: 0.01
+
+global_encoder:
+    lr: 3e-5
+    eps: 1e-8
+    use_max_grad_norm: true
+    max_grad_norm: 100.0
+    act: SiLU
+    hidden_dim: 1024
+    hidden_layers: 2
+    use_layernorm: true
+    out_scale: 0.01
